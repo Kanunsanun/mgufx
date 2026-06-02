@@ -22,6 +22,15 @@ for pkg in ("sounddevice", "_sounddevice_data"):
 # scipy.signal(sosfilt) / numpy は標準フックで概ね解決されるが明示しておく
 hiddenimports += ["scipy.signal", "scipy.special.cython_special", "numpy"]
 
+# scipy.stats._qmc(_sobol.pyx)が動的に importlib.resources / importlib.metadata を
+# 参照するが PyInstaller の静的解析では拾えず ModuleNotFoundError になるため明示同梱。
+hiddenimports += [
+    "importlib.resources",
+    "importlib.metadata",
+    "importlib.resources.readers",
+    "importlib.resources._common",
+]
+
 a = Analysis(
     ["run.py"],
     pathex=[],

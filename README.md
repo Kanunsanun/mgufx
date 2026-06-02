@@ -90,3 +90,8 @@ build.bat      :: PyInstaller で dist\MG12XU-StereoFX.exe を生成
 - Windows 共有ミキサーをバイパスし、往復遅延の目安は
   WASAPI 共有の 40–50ms → **ASIO で 15–20ms** 程度。96kHz 化でさらに短縮可。
 - xrun（ドロップアウト）が出る場合は Block を 256/512 に上げる。
+
+## ライセンス
+
+MIT License — 詳細は [LICENSE](LICENSE) を参照。
+© 2026 Kanunsanun

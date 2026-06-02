@@ -1,0 +1,5 @@
+# MG12XU Stereo FX 実行時依存パッケージ
+numpy
+scipy
+sounddevice
+PyQt5

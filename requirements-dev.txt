@@ -1,0 +1,3 @@
+# 開発・ビルド用の依存（実行時依存＋ビルドツール）
+-r requirements.txt
+pyinstaller

@@ -1,0 +1,4 @@
+# Windowsでも改行コードをLFに統一（バイナリ・batは除く）
+* text=auto eol=lf
+*.bat text eol=crlf
+*.spec text eol=lf

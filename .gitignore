@@ -12,12 +12,16 @@ build/
 dist/
 *.manifest
 
+# Inno Setup インストーラー出力
+installer/
+
 # OS / エディタ
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# ログ・一時
+# ログ・一時・作業用
 *.log
 _*.png
+_icon_concepts/

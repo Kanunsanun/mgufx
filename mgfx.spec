@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 設定（onefile・単一exe）。
+"""PyInstaller 設定（onedir・インストーラー同梱用）。
 
 要点:
 - sounddevice 同梱の ASIO 対応 PortAudio DLL は `_sounddevice_data` パッケージ内に
   あり、collect_all で datas/binaries として確実に同梱しないと ASIO が動かない。
-- onefile では実行時に一時フォルダへ展開され、sounddevice は _sounddevice_data の
-  パスから DLL を見つけるため、構造ごと同梱する必要がある。
+- scipy.stats._sobol(Cython) が動的に importlib.resources/metadata を参照するため明示同梱。
+- onedir（フォルダ構成）で出力 → Inno Setup でインストーラー化。
+  起動毎の展開が不要になり onefile より起動が速い。
 """
 
 from PyInstaller.utils.hooks import collect_all
@@ -19,11 +20,9 @@ for pkg in ("sounddevice", "_sounddevice_data"):
     binaries += b
     hiddenimports += h
 
-# scipy.signal(sosfilt) / numpy は標準フックで概ね解決されるが明示しておく
+# scipy.signal(sosfilt) / numpy
 hiddenimports += ["scipy.signal", "scipy.special.cython_special", "numpy"]
-
-# scipy.stats._qmc(_sobol.pyx)が動的に importlib.resources / importlib.metadata を
-# 参照するが PyInstaller の静的解析では拾えず ModuleNotFoundError になるため明示同梱。
+# scipy.stats._sobol が動的参照する標準ライブラリを明示同梱（起動クラッシュ防止）
 hiddenimports += [
     "importlib.resources",
     "importlib.metadata",
@@ -39,30 +38,37 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    # 未使用の重量級ライブラリを除外してサイズ削減
     excludes=["pyqtgraph", "matplotlib", "tkinter", "PySide2", "PySide6", "PyQt6"],
     noarchive=False,
 )
 
 pyz = PYZ(a.pure)
 
+# onedir: EXE は実行ファイルのみ（依存は COLLECT で同フォルダに展開）
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
-    name="MG12XU-StereoFX",
+    exclude_binaries=True,
+    name="UFX-MG",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,          # GUIアプリ（コンソール非表示）
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,              # アイコンを用意したら "icon.ico" を指定
+    icon="icon.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="UFX-MG",          # 出力フォルダ dist/UFX-MG/
 )

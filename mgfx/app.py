@@ -801,7 +801,7 @@ class EQRow(QtWidgets.QWidget):
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"MG12XU Stereo FX  v{__version__}  —  EQ / Comp / Meter")
+        self.setWindowTitle(f"UFX-MG  v{__version__}  —  EQ / Comp / Meter")
         self.engine = Engine()
         self._theme_name = "dark"
         self._themed = []        # set_theme を持つカスタムウィジェット

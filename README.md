@@ -1,7 +1,8 @@
-# MG12XU Stereo FX
+# UFX-MG
 
-YAMAHA MG12XU + Yamaha Steinberg USB ドライバーを用いた
+YAMAHA MG シリーズ（MG12XU）+ Yamaha Steinberg USB ドライバーを用いた
 ステレオバス用エフェクター（PC内挿入処理）。
+*UFX = エフェクトスイート / -MG = MG シリーズ対応。*
 
 ## 信号フロー
 

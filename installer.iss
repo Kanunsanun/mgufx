@@ -54,3 +54,37 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+{ アップデート時、旧バージョンを先に静かにアンインストールしてから新規導入する
+  （厳密方式）。プリセット/設定は %APPDATA%\UFX-MG に保存されており、
+  アンインストーラーは本体ファイルのみ削除するため、設定はそのまま引き継がれる。 }
+function GetUninstallString: String;
+var
+  sUnInstPath: String;
+  sUnInstallString: String;
+begin
+  sUnInstPath := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{DE57BE10-F7D8-4FCF-80AB-AD942F8FBE39}_is1';
+  sUnInstallString := '';
+  if not RegQueryStringValue(HKCU, sUnInstPath, 'UninstallString', sUnInstallString) then
+    RegQueryStringValue(HKLM, sUnInstPath, 'UninstallString', sUnInstallString);
+  Result := sUnInstallString;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  sUnInstallString: String;
+  iResultCode: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    sUnInstallString := GetUninstallString;
+    if sUnInstallString <> '' then
+    begin
+      sUnInstallString := RemoveQuotes(sUnInstallString);
+      Exec(sUnInstallString,
+        '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES',
+        '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+    end;
+  end;
+end;

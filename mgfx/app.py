@@ -12,9 +12,13 @@
 
 import sys
 import os
+import json
 import math
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
+
+# プリセット保存形式の版数（DSP構造が大きく変わったら上げ、必要なら移行処理を追加）
+PRESET_SCHEMA = 1
 
 from . import __version__
 from .engine import Engine, list_devices
@@ -841,6 +845,15 @@ class MainWindow(QtWidgets.QWidget):
             self.theme_combo.blockSignals(True)
             self.theme_combo.setCurrentIndex(idx)
             self.theme_combo.blockSignals(False)
+        # プリセット読込＋前回状態の自動復元
+        self._presets = {}
+        self._last_state = None
+        self._load_presets_file()
+        self._save_timer = QtCore.QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._write_presets_file)
+        if self._settings.value("auto_restore", True, type=bool) and self._last_state:
+            self._apply_dsp(self._last_state)
         # デバイス列挙(重い・特にASIO)はウィンドウ表示後に遅延実行 → 起動を体感高速化
         QtCore.QTimer.singleShot(0, self._populate_audio_devices)
         self.timer = QtCore.QTimer(self)
@@ -901,6 +914,120 @@ class MainWindow(QtWidgets.QWidget):
             p.fillRect(self.rect(), QtGui.QColor(0, 0, 0, self._bg_scrim))  # 暗幕
         else:
             p.fillRect(self.rect(), QtGui.QColor(THEMES[self._theme_name]["win_bg"]))
+
+    # -- プリセット / DSP状態の保存・復元 -----------------------------------
+    def _preset_path(self):
+        base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "UFX-MG")
+        return os.path.join(base, "presets.json")
+
+    def _capture_dsp(self):
+        """現在の DSP 状態をまとめて dict に。"""
+        return {
+            "eq": [b.slider.value() / 10.0 for b in self.eq_bands],
+            "eq_range": self.range_combo.currentData(),
+            "comp": {
+                "thr": self.c_thr.value(), "ratio": self.c_ratio.value(),
+                "atk": self.c_atk.value(), "rel": self.c_rel.value(),
+                "knee": self.c_knee.value(), "outgain": self.c_makeup.value(),
+            },
+            "eq_on": self.eq_toggle.isChecked(),
+            "comp_on": self.comp_toggle.isChecked(),
+        }
+
+    def _apply_dsp(self, st):
+        """dict から DSP 状態を復元（互換: 構造が合う項目のみ適用）。"""
+        if not isinstance(st, dict):
+            return
+        eq = st.get("eq")
+        if isinstance(eq, list) and len(eq) == len(self.eq_bands):
+            for b, g in zip(self.eq_bands, eq):
+                b.slider.setValue(int(round(float(g) * 10)))
+        rng = st.get("eq_range")
+        if rng is not None:
+            i = self.range_combo.findData(rng)
+            if i >= 0:
+                self.range_combo.setCurrentIndex(i)
+        c = st.get("comp", {})
+        for key, knob in (("thr", self.c_thr), ("ratio", self.c_ratio),
+                          ("atk", self.c_atk), ("rel", self.c_rel),
+                          ("knee", self.c_knee), ("outgain", self.c_makeup)):
+            if key in c:
+                knob.setValue(float(c[key]))
+        if "eq_on" in st:
+            self.eq_toggle.setChecked(bool(st["eq_on"]))
+        if "comp_on" in st:
+            self.comp_toggle.setChecked(bool(st["comp_on"]))
+
+    def _load_presets_file(self):
+        try:
+            with open(self._preset_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._presets = data.get("presets", {}) or {}
+            self._last_state = data.get("last")
+        except (FileNotFoundError, ValueError, OSError):
+            self._presets = {}
+            self._last_state = None
+
+    def _write_presets_file(self):
+        """名前付きプリセット＋現在状態(last)をファイルへ。本体と分離した %APPDATA% に保存。"""
+        data = {"schema": PRESET_SCHEMA, "presets": self._presets,
+                "last": self._capture_dsp()}
+        try:
+            os.makedirs(os.path.dirname(self._preset_path()), exist_ok=True)
+            with open(self._preset_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+
+    def _schedule_save(self):
+        """DSP変更後、少し待ってから保存（ドラッグ連打で書きすぎない）。"""
+        if hasattr(self, "_save_timer"):
+            self._save_timer.start(800)
+
+    def _reload_preset_combo(self):
+        if not hasattr(self, "preset_combo"):
+            return
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem("（プリセットを選択）", "")
+        for name in sorted(self._presets.keys()):
+            self.preset_combo.addItem(name, name)
+        self.preset_combo.blockSignals(False)
+
+    def _on_preset_selected(self, idx):
+        name = self.preset_combo.itemData(idx)
+        if name and name in self._presets:
+            self._apply_dsp(self._presets[name])
+
+    def _save_preset_as(self):
+        name, ok = QtWidgets.QInputDialog.getText(
+            self._dev_dialog or self, "プリセット保存", "プリセット名:")
+        name = (name or "").strip()
+        if not ok or not name:
+            return
+        if name in self._presets:
+            r = QtWidgets.QMessageBox.question(
+                self._dev_dialog or self, "上書き確認",
+                f"「{name}」を上書きしますか？")
+            if r != QtWidgets.QMessageBox.Yes:
+                return
+        self._presets[name] = self._capture_dsp()
+        self._write_presets_file()
+        self._reload_preset_combo()
+        i = self.preset_combo.findData(name)
+        if i >= 0:
+            self.preset_combo.setCurrentIndex(i)
+
+    def _delete_preset(self):
+        name = self.preset_combo.currentData()
+        if not name or name not in self._presets:
+            return
+        r = QtWidgets.QMessageBox.question(
+            self._dev_dialog or self, "削除確認", f"「{name}」を削除しますか？")
+        if r == QtWidgets.QMessageBox.Yes:
+            del self._presets[name]
+            self._write_presets_file()
+            self._reload_preset_combo()
 
     # -- UI 構築 ------------------------------------------------------------
     def _build_ui(self):
@@ -992,6 +1119,7 @@ class MainWindow(QtWidgets.QWidget):
         max_db = self.range_combo.currentData()
         for b in self.eq_bands:
             b.set_max(max_db)
+        self._schedule_save()
 
     def _comp_panel(self):
         box = QtWidgets.QGroupBox("コンプレッサー")
@@ -1166,16 +1294,32 @@ class MainWindow(QtWidgets.QWidget):
     def _open_dev_settings(self):
         if not self._devices_loaded:
             self._populate_audio_devices()   # 未読込なら即時読込
-        if self.engine.running:
-            QtWidgets.QMessageBox.information(
-                self, "設定", "動作中は変更できません。先に停止してください。")
-            return
         if self._dev_dialog is None:
             dlg = QtWidgets.QDialog(self)
-            dlg.setWindowTitle("デバイス / ルーティング設定")
-            dlg.setMinimumWidth(580)
+            dlg.setWindowTitle("設定")
+            dlg.setMinimumWidth(600)
             g = QtWidgets.QGridLayout(dlg)
-            # ドライバー推奨の注意書き（低遅延のため ASIO 推奨）
+            r = 0
+            # ── プリセット（DSP設定の保存・呼び出し）──
+            g.addWidget(QtWidgets.QLabel("<b>プリセット</b>（EQ＋コンプ）"), r, 0, 1, 4); r += 1
+            self.preset_combo = QtWidgets.QComboBox()
+            self._reload_preset_combo()
+            self.preset_combo.activated.connect(self._on_preset_selected)
+            g.addWidget(self.preset_combo, r, 0, 1, 2)
+            save_p = QtWidgets.QPushButton("名前を付けて保存…")
+            save_p.clicked.connect(self._save_preset_as)
+            del_p = QtWidgets.QPushButton("削除")
+            del_p.clicked.connect(self._delete_preset)
+            g.addWidget(save_p, r, 2); g.addWidget(del_p, r, 3); r += 1
+            self.auto_restore_chk = QtWidgets.QCheckBox("前回の設定を起動時に復元する")
+            self.auto_restore_chk.setChecked(
+                self._settings.value("auto_restore", True, type=bool))
+            self.auto_restore_chk.toggled.connect(
+                lambda on: self._settings.setValue("auto_restore", on))
+            g.addWidget(self.auto_restore_chk, r, 0, 1, 4); r += 1
+            line0 = QtWidgets.QFrame(); line0.setFrameShape(QtWidgets.QFrame.HLine)
+            g.addWidget(line0, r, 0, 1, 4); r += 1
+            # ── デバイス / ルーティング ──
             hint = QtWidgets.QLabel(
                 "💡 <b>低遅延で使うには ASIO ドライバー推奨</b><br>"
                 "「Yamaha Steinberg USB ASIO」など <b>(ASIO)</b> 表記の機器を、"
@@ -1186,25 +1330,35 @@ class MainWindow(QtWidgets.QWidget):
             hint.setStyleSheet(
                 "background: rgba(0,173,181,0.12); border:1px solid #00ADB5; "
                 "border-radius:6px; padding:8px;")
-            g.addWidget(hint, 0, 0, 1, 4)
-            g.addWidget(QtWidgets.QLabel("入力機器"), 1, 0); g.addWidget(self.in_combo, 1, 1, 1, 3)
-            g.addWidget(QtWidgets.QLabel("出力機器"), 2, 0); g.addWidget(self.out_combo, 2, 1, 1, 3)
-            g.addWidget(QtWidgets.QLabel("SR"), 3, 0); g.addWidget(self.sr_combo, 3, 1)
-            g.addWidget(QtWidgets.QLabel("Block"), 3, 2); g.addWidget(self.block_combo, 3, 3)
-            # 背景画像
+            g.addWidget(hint, r, 0, 1, 4); r += 1
+            self._dev_running_hint = QtWidgets.QLabel(
+                "⚠ 動作中はデバイス変更できません（停止後に変更可）。プリセット・背景は変更可。")
+            self._dev_running_hint.setStyleSheet("color:#E0573A;")
+            g.addWidget(self._dev_running_hint, r, 0, 1, 4); r += 1
+            g.addWidget(QtWidgets.QLabel("入力機器"), r, 0); g.addWidget(self.in_combo, r, 1, 1, 3); r += 1
+            g.addWidget(QtWidgets.QLabel("出力機器"), r, 0); g.addWidget(self.out_combo, r, 1, 1, 3); r += 1
+            g.addWidget(QtWidgets.QLabel("SR"), r, 0); g.addWidget(self.sr_combo, r, 1)
+            g.addWidget(QtWidgets.QLabel("Block"), r, 2); g.addWidget(self.block_combo, r, 3); r += 1
+            self._dev_widgets = [self.in_combo, self.out_combo, self.sr_combo, self.block_combo]
             line = QtWidgets.QFrame(); line.setFrameShape(QtWidgets.QFrame.HLine)
-            g.addWidget(line, 4, 0, 1, 4)
-            g.addWidget(QtWidgets.QLabel("背景画像"), 5, 0)
+            g.addWidget(line, r, 0, 1, 4); r += 1
+            # ── 背景画像 ──
+            g.addWidget(QtWidgets.QLabel("背景画像"), r, 0)
             bg_choose = QtWidgets.QPushButton("画像を選択…")
             bg_choose.clicked.connect(self._choose_bg_image)
             bg_clear = QtWidgets.QPushButton("標準に戻す")
             bg_clear.clicked.connect(self._clear_bg_image)
-            g.addWidget(bg_choose, 5, 1, 1, 2)
-            g.addWidget(bg_clear, 5, 3)
+            g.addWidget(bg_choose, r, 1, 1, 2); g.addWidget(bg_clear, r, 3); r += 1
             close = QtWidgets.QPushButton("閉じる")
             close.clicked.connect(dlg.accept)
-            g.addWidget(close, 6, 0, 1, 4)
+            g.addWidget(close, r, 0, 1, 4)
             self._dev_dialog = dlg
+        # 動作中はデバイス変更だけ不可（プリセット・背景は可）
+        running = self.engine.running
+        for wdg in self._dev_widgets:
+            wdg.setEnabled(not running)
+        self._dev_running_hint.setVisible(running)
+        self._reload_preset_combo()
         self._dev_dialog.show()
         self._dev_dialog.raise_()
 
@@ -1264,6 +1418,7 @@ class MainWindow(QtWidgets.QWidget):
     def _on_eq(self, i, db):
         if self.engine.eq:
             self.engine.eq.set_gain(i, db)
+        self._schedule_save()
 
     def _eq_flat(self):
         for b in self.eq_bands:
@@ -1272,10 +1427,12 @@ class MainWindow(QtWidgets.QWidget):
     def _on_eq_enable(self, on):
         if self.engine.eq:
             self.engine.eq.enabled = on
+        self._schedule_save()
 
     def _on_comp_enable(self, on):
         if self.engine.comp:
             self.engine.comp.enabled = on
+        self._schedule_save()
 
     def _on_comp(self):
         thr = self.c_thr.value()
@@ -1291,6 +1448,7 @@ class MainWindow(QtWidgets.QWidget):
             c.knee_db = knee
             c.makeup_db = makeup
         self.comp_graph.set_params(thr, ratio, knee, makeup)
+        self._schedule_save()
 
     def _toggle(self):
         if self.engine.running:
@@ -1331,6 +1489,7 @@ class MainWindow(QtWidgets.QWidget):
         self._apply_dev_elide()   # 幅変化に応じてデバイス名を再省略
 
     def closeEvent(self, ev):
+        self._write_presets_file()   # 終了時の状態を保存（次回 自動復元）
         self.engine.stop()
         super().closeEvent(ev)
 

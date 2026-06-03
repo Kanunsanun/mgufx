@@ -11,6 +11,7 @@
 """
 
 import sys
+import os
 import math
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -66,12 +67,27 @@ THEMES = {
 }
 
 
-def window_qss(t):
-    """ウィンドウ全体の QSS（標準ウィジェット用）をパレットから生成。"""
+def _rgba(hex_color, alpha):
+    """'#RRGGBB' と alpha(0-255) → 'rgba(r,g,b,a)'。"""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def window_qss(t, has_bg=False):
+    """ウィンドウ全体の QSS。has_bg=True（背景画像あり）のときは地を透過させ
+    パネルを半透明にして、背景が透けるようにする（地は paintEvent が描く）。"""
+    if has_bg:
+        panel = _rgba(t["panel_bg"], 205)     # 半透明パネル（背景が透ける）
+        scroll = "transparent"
+    else:
+        panel = t["panel_bg"]
+        scroll = t["panel_bg"]
     return f"""
-    QWidget {{ background: {t['win_bg']}; color: {t['text']}; }}
+    QWidget {{ color: {t['text']}; }}
+    QDialog {{ background: {t['win_bg']}; }}
     QGroupBox {{
-        background: {t['panel_bg']}; border: 1px solid {t['panel_border']};
+        background: {panel}; border: 1px solid {t['panel_border']};
         border-radius: 6px; margin-top: 18px; font-weight: bold;
     }}
     QGroupBox::title {{
@@ -92,8 +108,8 @@ def window_qss(t):
     }}
     QPushButton:hover {{ border-color: {t['accent']}; }}
     QLabel {{ color: {t['text']}; background: transparent; }}
-    QScrollArea {{ background: {t['panel_bg']}; border: none; }}
-    QScrollArea > QWidget > QWidget {{ background: {t['panel_bg']}; }}
+    QScrollArea {{ background: {scroll}; border: none; }}
+    QScrollArea > QWidget > QWidget {{ background: {scroll}; }}
     """
 
 
@@ -803,11 +819,28 @@ class MainWindow(QtWidgets.QWidget):
         super().__init__()
         self.setWindowTitle(f"UFX-MG  v{__version__}  —  EQ / Comp / Meter")
         self.engine = Engine()
-        self._theme_name = "dark"
+        self._settings = QtCore.QSettings("Kanunsanun", "UFX-MG")
+        # 背景画像の状態
+        self._bg_pixmap = None
+        self._bg_scaled = None
+        self._bg_scrim = 96       # 背景の上に重ねる暗幕（0-255）。UIの可読性を確保
+        # 記憶したテーマを復元
+        saved = self._settings.value("theme", "dark")
+        self._theme_name = saved if saved in THEMES else "dark"
         self._themed = []        # set_theme を持つカスタムウィジェット
         self._knobs = []
         self._build_ui()
-        self.apply_theme("dark")
+        # 記憶した背景画像を復元（あれば）
+        bgp = self._settings.value("bg_image", "")
+        if bgp and os.path.exists(bgp):
+            self._set_bg_image(bgp, save=False)
+        self.apply_theme(self._theme_name)
+        # テーマ選択を記憶値に合わせる
+        idx = self.theme_combo.findData(self._theme_name)
+        if idx >= 0:
+            self.theme_combo.blockSignals(True)
+            self.theme_combo.setCurrentIndex(idx)
+            self.theme_combo.blockSignals(False)
         # デバイス列挙(重い・特にASIO)はウィンドウ表示後に遅延実行 → 起動を体感高速化
         QtCore.QTimer.singleShot(0, self._populate_audio_devices)
         self.timer = QtCore.QTimer(self)
@@ -816,11 +849,58 @@ class MainWindow(QtWidgets.QWidget):
 
     def apply_theme(self, name):
         self._theme_name = name
+        self._settings.setValue("theme", name)
         t = THEMES[name]
-        self.setStyleSheet(window_qss(t))
+        has_bg = self._bg_pixmap is not None and not self._bg_pixmap.isNull()
+        self.setStyleSheet(window_qss(t, has_bg))
         for wdg in self._themed:
             wdg.set_theme(t)
         self._update_big_button()   # 巨大ボタンはテーマ非依存色で再適用
+        self.update()               # 地（背景）を描き直す
+
+    # -- 背景画像 -----------------------------------------------------------
+    def _rescale_bg(self):
+        if self._bg_pixmap is not None and not self._bg_pixmap.isNull() and self.width() > 0:
+            self._bg_scaled = self._bg_pixmap.scaled(
+                self.size(), QtCore.Qt.KeepAspectRatioByExpanding,
+                QtCore.Qt.SmoothTransformation)
+        else:
+            self._bg_scaled = None
+
+    def _choose_bg_image(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "背景画像を選択", "",
+            "画像ファイル (*.png *.jpg *.jpeg *.bmp *.webp)")
+        if path:
+            self._set_bg_image(path)
+
+    def _set_bg_image(self, path, save=True):
+        pm = QtGui.QPixmap(path)
+        if pm.isNull():
+            if save:
+                QtWidgets.QMessageBox.warning(self, "背景画像", "画像を読み込めませんでした。")
+            return
+        self._bg_pixmap = pm
+        self._rescale_bg()
+        if save:
+            self._settings.setValue("bg_image", path)
+        self.apply_theme(self._theme_name)   # 半透明パネルへ切替＋再描画
+
+    def _clear_bg_image(self):
+        self._bg_pixmap = None
+        self._bg_scaled = None
+        self._settings.setValue("bg_image", "")
+        self.apply_theme(self._theme_name)
+
+    def paintEvent(self, _ev):
+        p = QtGui.QPainter(self)
+        if self._bg_scaled is not None:
+            x = (self.width() - self._bg_scaled.width()) // 2
+            y = (self.height() - self._bg_scaled.height()) // 2
+            p.drawPixmap(x, y, self._bg_scaled)
+            p.fillRect(self.rect(), QtGui.QColor(0, 0, 0, self._bg_scrim))  # 暗幕
+        else:
+            p.fillRect(self.rect(), QtGui.QColor(THEMES[self._theme_name]["win_bg"]))
 
     # -- UI 構築 ------------------------------------------------------------
     def _build_ui(self):
@@ -971,7 +1051,7 @@ class MainWindow(QtWidgets.QWidget):
 
     # 巨大トグルボタンのテキスト（配色はテーマ連動: run_bg/stop_bg 等）
     BIG_STOPPED_TXT = "▶  AUDIO START  (開始)"
-    BIG_RUNNING_TXT = "■  AUDIO ONLINE  (停止)"
+    BIG_RUNNING_TXT = "■  AUDIO STOP  (停止)"
 
     def _device_bar(self):
         # デバイス選択コンボはダイアログ用に先に生成（状態を保持）
@@ -1093,15 +1173,37 @@ class MainWindow(QtWidgets.QWidget):
         if self._dev_dialog is None:
             dlg = QtWidgets.QDialog(self)
             dlg.setWindowTitle("デバイス / ルーティング設定")
-            dlg.setMinimumWidth(560)
+            dlg.setMinimumWidth(580)
             g = QtWidgets.QGridLayout(dlg)
-            g.addWidget(QtWidgets.QLabel("入力機器"), 0, 0); g.addWidget(self.in_combo, 0, 1, 1, 3)
-            g.addWidget(QtWidgets.QLabel("出力機器"), 1, 0); g.addWidget(self.out_combo, 1, 1, 1, 3)
-            g.addWidget(QtWidgets.QLabel("SR"), 2, 0); g.addWidget(self.sr_combo, 2, 1)
-            g.addWidget(QtWidgets.QLabel("Block"), 2, 2); g.addWidget(self.block_combo, 2, 3)
+            # ドライバー推奨の注意書き（低遅延のため ASIO 推奨）
+            hint = QtWidgets.QLabel(
+                "💡 <b>低遅延で使うには ASIO ドライバー推奨</b><br>"
+                "「Yamaha Steinberg USB ASIO」など <b>(ASIO)</b> 表記の機器を、"
+                "<b>入力・出力とも同じもの</b>に選んでください。<br>"
+                "MME / Windows WDM-KS は遅延が大きくなります。")
+            hint.setWordWrap(True)
+            hint.setTextFormat(QtCore.Qt.RichText)
+            hint.setStyleSheet(
+                "background: rgba(0,173,181,0.12); border:1px solid #00ADB5; "
+                "border-radius:6px; padding:8px;")
+            g.addWidget(hint, 0, 0, 1, 4)
+            g.addWidget(QtWidgets.QLabel("入力機器"), 1, 0); g.addWidget(self.in_combo, 1, 1, 1, 3)
+            g.addWidget(QtWidgets.QLabel("出力機器"), 2, 0); g.addWidget(self.out_combo, 2, 1, 1, 3)
+            g.addWidget(QtWidgets.QLabel("SR"), 3, 0); g.addWidget(self.sr_combo, 3, 1)
+            g.addWidget(QtWidgets.QLabel("Block"), 3, 2); g.addWidget(self.block_combo, 3, 3)
+            # 背景画像
+            line = QtWidgets.QFrame(); line.setFrameShape(QtWidgets.QFrame.HLine)
+            g.addWidget(line, 4, 0, 1, 4)
+            g.addWidget(QtWidgets.QLabel("背景画像"), 5, 0)
+            bg_choose = QtWidgets.QPushButton("画像を選択…")
+            bg_choose.clicked.connect(self._choose_bg_image)
+            bg_clear = QtWidgets.QPushButton("標準に戻す")
+            bg_clear.clicked.connect(self._clear_bg_image)
+            g.addWidget(bg_choose, 5, 1, 1, 2)
+            g.addWidget(bg_clear, 5, 3)
             close = QtWidgets.QPushButton("閉じる")
             close.clicked.connect(dlg.accept)
-            g.addWidget(close, 3, 0, 1, 4)
+            g.addWidget(close, 6, 0, 1, 4)
             self._dev_dialog = dlg
         self._dev_dialog.show()
         self._dev_dialog.raise_()
@@ -1127,6 +1229,10 @@ class MainWindow(QtWidgets.QWidget):
         info = (f"IN: {self._short_dev(self.in_combo)}    "
                 f"OUT: {self._short_dev(self.out_combo)}    "
                 f"SR {sr}    Block {blk_txt}")
+        # ASIO 以外（MME/WDM等）が選ばれていたら高遅延の警告を先頭に（省略で隠れない）
+        both = (self.in_combo.currentText() + self.out_combo.currentText()).upper()
+        if both and "ASIO" not in both:
+            info = "⚠ 高遅延：ASIO推奨    " + info
         if self.engine.running and self.engine.xrun:
             info += f"    ⚠ xrun={self.engine.xrun}"
         self._dev_info_full = info
@@ -1221,6 +1327,7 @@ class MainWindow(QtWidgets.QWidget):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self._rescale_bg()        # 背景画像をウィンドウサイズにカバー表示
         self._apply_dev_elide()   # 幅変化に応じてデバイス名を再省略
 
     def closeEvent(self, ev):

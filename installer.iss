@@ -6,7 +6,7 @@
 #define MyAppVersion "1.0.3"
 #define MyAppPublisher "Kanunsanun"
 #define MyAppExeName "UFX-MG.exe"
-#define MyAppURL "https://github.com/Kanunsanun/mgufx"
+#define MyAppURL "https://github.com/Kanunsanun/UFX-MG"
 
 [Setup]
 AppId={{DE57BE10-F7D8-4FCF-80AB-AD942F8FBE39}

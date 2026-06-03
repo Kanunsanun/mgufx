@@ -1,7 +1,7 @@
 # mgfx プロジェクト固有ルール（Claude 行動ルール）
 
 `asobiba/mgfx/` は自己完結した配布プロジェクト
-（GitHub 公開リポジトリ `Kanunsanun/mgufx`、MIT ライセンス）。
+（GitHub 公開リポジトリ `Kanunsanun/UFX-MG`、MIT ライセンス）。
 親 `asobiba/CLAUDE.md` とグローバルルールを継承しつつ、本プロジェクトでは
 以下を**追加で許可なしに実行可能**とする。
 
@@ -11,7 +11,7 @@
   - ローカル操作: `git add` / `commit` / `tag` / `branch` / `checkout` /
     `merge` / `log` / `status` / `diff` など
   - **リモート通信**: `git push`（`git push --tags` 含む）/ `pull` / `fetch` /
-    `clone`。GitHub `Kanunsanun/mgufx` への push 等の外部通信を許可する。
+    `clone`。GitHub `Kanunsanun/UFX-MG` への push 等の外部通信を許可する。
 - **GitHub リリース操作（`gh` CLI、認証済みの場合）**
   - `gh release create` / `gh release upload` / `gh release view` /
     `gh release list` など、バージョン公開に必要なコマンド。

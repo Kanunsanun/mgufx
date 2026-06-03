@@ -38,6 +38,11 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; アップデート時、旧バージョンの依存フォルダを先に削除して残骸を残さない
+; （_internal は毎回まるごと再配置されるユーザーデータ非依存のフォルダ）
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 ; PyInstaller onedir 出力をまるごと同梱
 Source: "dist\UFX-MG\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

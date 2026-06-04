@@ -30,6 +30,9 @@ hiddenimports += [
     "importlib.resources._common",
 ]
 
+# 起動スプラッシュ画像（Qt の QSplashScreen で表示）をバンドル
+datas += [("splash.png", ".")]
+
 a = Analysis(
     ["run.py"],
     pathex=[],

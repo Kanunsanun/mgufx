@@ -1494,14 +1494,20 @@ class MainWindow(QtWidgets.QWidget):
         super().closeEvent(ev)
 
 
-def main():
-    app = QtWidgets.QApplication(sys.argv)
+def show_main(app):
+    """MainWindow を生成し、ノートPCのフルスクリーン前提で最大化表示して返す。
+    （resize→showMaximized だと Windows で最大化フラグだけ立って実サイズが小さい
+    不具合が出るため、availableGeometry を明示してから最大化する。）"""
     w = MainWindow()
-    # スクリーンの利用可能領域を明示設定してから最大化（resize→showMaximizedだと
-    # Windowsで「最大化フラグだけ立って実サイズは小さい」不具合が出るため）
     scr = app.primaryScreen().availableGeometry()
     w.setGeometry(scr)
     w.showMaximized()
+    return w
+
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    w = show_main(app)
     sys.exit(app.exec_())
 
 

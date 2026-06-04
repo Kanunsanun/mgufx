@@ -8,7 +8,7 @@ ASIO 対応 PortAudio DLL を読み込ませる（共有ミキサーをバイパ
 import os
 
 # バージョン（単一の真実源）。配布・アップデート判定はこの値を参照する。
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 __license__ = "MIT"
 __copyright__ = "Copyright (c) 2026 Kanunsanun"
 
